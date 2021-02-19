@@ -2,6 +2,7 @@ const initMiddleware  = require('../lib/index');
 const { expect }      = require('chai');
 const agent           = require('supertest-koa-agent');
 const crypto          = require('crypto');
+const sinon           = require('sinon');
 const {
   strapi,
   requests,
@@ -12,6 +13,7 @@ describe('Caching', () => {
   let middleware = null;
 
   before(() => {
+    sinon.stub(process, 'version').value('3.4.0');
     strapi.config = {
       middleware: {
         settings: {
@@ -21,8 +23,10 @@ describe('Caching', () => {
             populateContext: true,
             populateStrapiMiddleware: true,
             enableEtagSupport: true,
+            clearRelatedCache: true,
             models: [
               'academy',
+              'researcher',
               {
                 model: 'homepage',
                 singleType: true
@@ -53,6 +57,8 @@ describe('Caching', () => {
 
     strapi.start();
   });
+
+  after(() => sinon.restore());
 
   beforeEach(async () => {
     await middleware.cache.reset();
@@ -158,6 +164,40 @@ describe('Caching', () => {
         expect(requests).to.have.lengthOf(3);
       });
 
+      it(`busts the cache of a related model (via direct relation) on a ${method.toUpperCase()} resquest`, async () => {
+        const res1 = await agent(strapi.app).get('/academies').expect(200);
+        const res2 = await agent(strapi.app).get('/researchers').expect(200);
+
+        expect(requests).to.have.lengthOf(2);
+
+        const res3 = await agent(strapi.app)[method]('/academies').expect(200);
+
+        expect(res3.body.uid).to.equal(res2.body.uid + 1);
+        expect(requests).to.have.lengthOf(3);
+
+        const res4 = await agent(strapi.app).get('/researchers').expect(200);
+
+        expect(res4.body.uid).to.equal(res3.body.uid + 1);
+        expect(requests).to.have.lengthOf(4);
+      });
+
+      it(`busts the cache of a related model (via relation in component) on a ${method.toUpperCase()} resquest`, async () => {
+        const res1 = await agent(strapi.app).get('/researchers').expect(200);
+        const res2 = await agent(strapi.app).get('/homepage').expect(200);
+
+        expect(requests).to.have.lengthOf(2);
+
+        const res3 = await agent(strapi.app)[method]('/researchers').expect(200);
+
+        expect(res3.body.uid).to.equal(res2.body.uid + 1);
+        expect(requests).to.have.lengthOf(3);
+
+        const res4 = await agent(strapi.app).get('/homepage').expect(200);
+
+        expect(res4.body.uid).to.equal(res3.body.uid + 1);
+        expect(requests).to.have.lengthOf(4);
+      });
+
       context(`when an ID is specified on a ${method.toUpperCase()} request`, () => {
         it(`doesn't bust the cache for other IDs`, async () => {
           const res1 = await agent(strapi.app).get('/academies/1').expect(200);
@@ -182,7 +222,7 @@ describe('Caching', () => {
 
         expect(requests).to.have.lengthOf(1);
 
-        const res2 = await agent(strapi.app)[method]('/content-manager/explorer/application::academy.academy').expect(200);
+        const res2 = await agent(strapi.app)[method]('/content-manager/collection-types/application::academy.academy').expect(200);
 
         expect(res2.body.uid).to.equal(res1.body.uid + 1);
         expect(requests).to.have.lengthOf(2);
@@ -198,7 +238,7 @@ describe('Caching', () => {
 
         expect(requests).to.have.lengthOf(1);
 
-        const res2 = await agent(strapi.app)[method]('/content-manager/explorer/application::academy.academy/publish/1').expect(200);
+        const res2 = await agent(strapi.app)[method]('/content-manager/collection-types/application::academy.academy/publish/1').expect(200);
 
         expect(res2.body.uid).to.equal(res1.body.uid + 1);
         expect(requests).to.have.lengthOf(2);
@@ -263,7 +303,7 @@ describe('Caching', () => {
 
         expect(requests).to.have.lengthOf(1);
 
-        const res2 = await agent(strapi.app)[method]('/content-manager/explorer/application::homepage.homepage').expect(200);
+        const res2 = await agent(strapi.app)[method]('/content-manager/single-types/application::homepage.homepage').expect(200);
 
         expect(res2.body.uid).to.equal(res1.body.uid + 1);
         expect(requests).to.have.lengthOf(2);
